@@ -35,8 +35,8 @@ namespace SharedMemory {
                 logger->debug("No shared memory manager found for key: %s", key.c_str());
                 return Napi::Boolean::New(env, false);
             }
-            auto manager = managerMap[key];
-            managerMap.erase(key);
+            // auto manager = managerMap[key];
+            // managerMap.erase(key);
             
         } catch (const std::exception& e) {
             logger->debug("Error: %s", e.what());

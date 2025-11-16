@@ -42,20 +42,18 @@ namespace SharedMemory {
     SharedMemoryManager::SharedMemoryManager(const std::string& key, bool create, size_t size) 
         : key_(key), size_(size), address_(nullptr)
 #ifdef _WIN32
-        , file_mapping_(nullptr), mutex_(nullptr)
+        , file_mapping_(nullptr)
 #else
 
 #endif
     {
         // 计算实际需要分配的大小（包括头部）
         size_t total_size = sizeof(SharedMemoryHeader) + size;
-        logger->debug("Size of header: %zu", sizeof(SharedMemoryHeader));
-        logger->debug("Size of header + size: %zu", total_size);
+        logger->debug("Size of header: {}", sizeof(SharedMemoryHeader));
+        logger->debug("Size of header + size: {}", total_size);
         
 #ifdef _WIN32
         // Windows实现
-        // 创建互斥锁名称
-        std::string mutex_name = "Global\\SharedMemoryMutex_" + key;
         
         // 检查是否在Wine环境下运行
         bool is_wine = is_running_under_wine();
@@ -65,7 +63,7 @@ namespace SharedMemory {
         if (is_wine) {
             // Wine环境下使用/dev/shm目录
             file_path = "/dev/shm/skyline_" + key + ".dat";
-            logger->debug("Using Wine shared memory path: %s", file_path.c_str());
+            logger->debug("Using Wine shared memory path: {}", file_path);
             
             // 确保/dev/shm目录存在
             // 在Wine环境下，这个目录应该已经存在，但为了安全起见，我们检查一下
@@ -93,23 +91,6 @@ namespace SharedMemory {
             create_directory(shared_memory_dir);
         }
         
-        // 创建或打开互斥锁
-        mutex_ = CreateMutexA(NULL, FALSE, mutex_name.c_str());
-        if (!mutex_) {
-            DWORD error = GetLastError();
-            logger->debug("Failed to create mutex, error code: %lu", error);
-            throw std::runtime_error("Failed to create mutex");
-        }
-        
-        // 获取互斥锁
-        if (WaitForSingleObject(mutex_, 5000) != WAIT_OBJECT_0) {
-            DWORD error = GetLastError();
-            logger->debug("Failed to acquire mutex, error code: %lu", error);
-            CloseHandle(mutex_);
-            mutex_ = nullptr;
-            throw std::runtime_error("Failed to acquire mutex");
-        }
-        
         try {
             // 创建或打开文件
             HANDLE file_handle = INVALID_HANDLE_VALUE;
@@ -128,9 +109,6 @@ namespace SharedMemory {
                 if (file_handle == INVALID_HANDLE_VALUE) {
                     DWORD error = GetLastError();
                     logger->debug("Failed to create file, error code: %lu", error);
-                    ReleaseMutex(mutex_);
-                    CloseHandle(mutex_);
-                    mutex_ = nullptr;
                     throw std::runtime_error("Failed to create file");
                 }
                 
@@ -142,9 +120,6 @@ namespace SharedMemory {
                     DWORD error = GetLastError();
                     logger->debug("Failed to set file size, error code: %lu", error);
                     CloseHandle(file_handle);
-                    ReleaseMutex(mutex_);
-                    CloseHandle(mutex_);
-                    mutex_ = nullptr;
                     throw std::runtime_error("Failed to set file size");
                 }
             } else {
@@ -162,9 +137,6 @@ namespace SharedMemory {
                 if (file_handle == INVALID_HANDLE_VALUE) {
                     DWORD error = GetLastError();
                     logger->debug("Failed to open file, error code: %lu", error);
-                    ReleaseMutex(mutex_);
-                    CloseHandle(mutex_);
-                    mutex_ = nullptr;
                     throw std::runtime_error("Failed to open file:" + file_path);
                 }
             }
@@ -178,9 +150,6 @@ namespace SharedMemory {
             bool success = create_mapping(file_handle, remaining_size);
             if (!success) {
                 CloseHandle(file_handle);
-                ReleaseMutex(mutex_);
-                CloseHandle(mutex_);
-                mutex_ = nullptr;
                 throw std::runtime_error("Failed to create mapping");
             }
             
@@ -189,21 +158,18 @@ namespace SharedMemory {
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 header->size = size;
                 header->version = 1;
-                logger->debug("Initialized shared memory header: size=%zu, version=%d", size, header->version);
+                logger->debug("Initialized shared memory header: size={}, version={}", size, header->version);
             }
             else {
                 // 读取头部信息
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 size = header->size;
-                logger->debug("Read shared memory header: size=%zu, version=%d", size, header->version);
+                logger->debug("Read shared memory header: size={}, version={}", size, header->version);
                 
                 // 以头部信息为基准，重新映射
                 success = create_mapping(file_handle, size + sizeof(SharedMemoryHeader));
                 if (!success) {
                     CloseHandle(file_handle);
-                    ReleaseMutex(mutex_);
-                    CloseHandle(mutex_);
-                    mutex_ = nullptr;
                     throw std::runtime_error("Failed to create mapping with header size");
                 }
             }
@@ -214,7 +180,7 @@ namespace SharedMemory {
             // 存储文件路径
             file_path_ = file_path;
             
-            logger->debug("Shared memory %s: key=%s, size=%zu, address=%p, file=%s", 
+            logger->debug("Shared memory {}: key={}, size={}, address={}, file={}", 
                 create ? "created" : "opened", 
                 key.c_str(), 
                 size, 
@@ -233,17 +199,9 @@ namespace SharedMemory {
                 file_mapping_ = nullptr;
             }
             
-            if (mutex_) {
-                ReleaseMutex(mutex_);
-                CloseHandle(mutex_);
-                mutex_ = nullptr;
-            }
-            
             throw;
         }
         
-        // 释放互斥锁
-        ReleaseMutex(mutex_);
 #else
         // Linux实现
         // 创建共享内存名称
@@ -352,11 +310,6 @@ namespace SharedMemory {
             file_mapping_ = nullptr;
         }
         
-        if (mutex_) {
-            ReleaseMutex(mutex_);
-            CloseHandle(mutex_);
-            mutex_ = nullptr;
-        }
         DeleteFileA(file_path_.c_str());
 #else
         // Linux实现

@@ -28,8 +28,7 @@ namespace SharedMemory {
         std::string key = info[0].As<Napi::String>().Utf8Value();
         
         try {
-            logger->info("Remove memory call.");
-            logger->debug("Read arguments.");
+            logger->info("Remove memory call. {}", key);
             
             if (auto target = managerMap.find(key);target == managerMap.end()) {
                 logger->debug("No shared memory manager found for key: %s", key.c_str());
@@ -38,6 +37,7 @@ namespace SharedMemory {
             // auto manager = managerMap[key];
             // managerMap.erase(key);
             
+            logger->debug("Remove end.");
         } catch (const std::exception& e) {
             logger->debug("Error: %s", e.what());
             throw Napi::Error::New(env, e.what());

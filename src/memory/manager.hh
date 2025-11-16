@@ -58,7 +58,6 @@ namespace SharedMemory {
 
 #ifdef _WIN32
         HANDLE file_mapping_;       // 文件映射句柄
-        HANDLE mutex_;              // 互斥锁句柄
         
         // 创建文件映射
         bool create_mapping(HANDLE file_handle, size_t mapping_size);

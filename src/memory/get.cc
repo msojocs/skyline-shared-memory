@@ -37,14 +37,14 @@ namespace SharedMemory {
             void* addr = manager->get_address();
             size_t size = manager->get_size();
             
-            logger->debug("Shared memory opened: key=%s, size=%zu, address=%p", 
-                key.c_str(), size, addr);
+            logger->debug("Shared memory opened: key={}, size={}, address={}", 
+                key, size, addr);
             
             // 读取头部信息
             SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(addr);
             size_t data_size = header->size;
             
-            logger->debug("Header information: size=%zu", data_size);
+            logger->debug("Header information: size={}", data_size);
             
             // 获取数据区域的地址
             void* data_addr = static_cast<char*>(addr) + sizeof(SharedMemoryHeader);

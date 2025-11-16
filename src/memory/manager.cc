@@ -1,9 +1,7 @@
-#include "../memory.hh"
 #include "../logger.hh"
-#include <cmath>
 #include <cstring>
 #include <sys/stat.h>
-#include <stdexcept>
+#include "manager.hh"
 
 #ifdef _WIN32
 #include <direct.h> // 用于Windows目录创建
@@ -167,7 +165,7 @@ namespace SharedMemory {
                     ReleaseMutex(mutex_);
                     CloseHandle(mutex_);
                     mutex_ = nullptr;
-                    throw std::runtime_error("Failed to open file");
+                    throw std::runtime_error("Failed to open file:" + file_path);
                 }
             }
             
@@ -400,6 +398,7 @@ namespace SharedMemory {
             CloseHandle(mutex_);
             mutex_ = nullptr;
         }
+        DeleteFileA(file_path_.c_str());
 #else
         // Linux实现
         // 释放资源

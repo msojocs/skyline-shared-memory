@@ -12,7 +12,6 @@ process.on('uncaughtException', (err) => {
         const key = "2124";
         const length = 4081; // 共享内存的大小（字节）
         
-        sharedMemory.setConsole(console.info)
         console.info('-------set--------')
         // 创建共享内存
         let result = sharedMemory.setMemory(key, length);
@@ -56,7 +55,7 @@ process.on('uncaughtException', (err) => {
                 console.info('mem: ', sharedMemory.getMemory(key))
             }
             catch(e){
-                console.info('无法获取共享内存，清理成功');
+                console.info('无法获取共享内存，清理成功:', e);
             }
         } catch (cleanupError) {
             console.error('清理共享内存失败:', cleanupError);

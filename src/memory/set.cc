@@ -1,13 +1,14 @@
 #include "napi.h"
-#include "../memory.hh"
+#include "memory.hh"
 #include "../logger.hh"
 #include <cstring>
 #include <memory>
+#include "manager.hh"
 #include <map>
 
 namespace SharedMemory {
     using Logger::logger;
-    static std::map<std::string, std::shared_ptr<SharedMemoryManager>> managerMap;
+    std::map<std::string, std::shared_ptr<SharedMemoryManager>> managerMap;
     Napi::Value set_memory(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
         

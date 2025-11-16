@@ -1,14 +1,13 @@
 #include "napi.h"
-#include "../memory.hh"
+#include "memory.hh"
 #include "../logger.hh"
 #include <cstring>
 #include <memory>
+#include "manager.hh"
 #include <map>
 
 namespace SharedMemory {
     using Logger::logger;
-    // 全局变量来保存共享内存资源
-    static std::map<std::string, std::shared_ptr<SharedMemoryManager>> managerMap;
     Napi::Value get_memory(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
         
@@ -27,8 +26,11 @@ namespace SharedMemory {
             logger->info("Get memory call.");
             logger->debug("Creating SharedMemoryManager...");
             
-            // 创建共享内存管理器
-            auto manager = managerMap[key] = std::make_shared<SharedMemoryManager>(key, false);
+            if (auto target = managerMap.find(key);target == managerMap.end()) {
+                managerMap[key] = std::make_shared<SharedMemoryManager>(key, false);
+            }
+            // 取共享内存管理器
+            auto manager = managerMap[key];
             logger->debug("SharedMemoryManager created successfully.");
             
             // 获取共享内存的地址和大小

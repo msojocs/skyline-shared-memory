@@ -4,7 +4,6 @@ const key = "2124";
 try {
     // 获取共享内存
     console.info('-------get--------')
-    sharedMemory.setConsole(console.info)
     const result = sharedMemory.getMemory(key);
     if (!result || !result.byteLength) {
         throw new Error('获取共享内存失败或共享内存为空');
@@ -41,6 +40,6 @@ try {
         throw cleanupError;
     }
 } catch (error) {
-    console.error('操作失败:', error.message);
+    console.error('Get 操作失败:', error.message);
     process.exit(1);
 }

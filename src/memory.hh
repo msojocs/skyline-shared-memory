@@ -21,10 +21,6 @@ namespace SharedMemory {
     // 全局回调函数
     extern Napi::FunctionReference console_callback;
 
-    // 日志辅助函数
-    void log(const std::string& message);
-    void log(const char* format, ...);
-
     // 清理控制台回调函数
     void cleanup_console();
 

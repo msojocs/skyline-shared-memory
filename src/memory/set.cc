@@ -1,10 +1,12 @@
 #include "napi.h"
 #include "../memory.hh"
+#include "../logger.hh"
 #include <cstring>
 #include <memory>
 #include <map>
 
 namespace SharedMemory {
+    using Logger::logger;
     static std::map<std::string, std::shared_ptr<SharedMemoryManager>> managerMap;
     Napi::Value set_memory(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
@@ -30,18 +32,18 @@ namespace SharedMemory {
         }
         
         try {
-            log("Set memory call.");
-            log("Creating SharedMemoryManager...");
+            logger->debug("Set memory call.");
+            logger->debug("Creating SharedMemoryManager...");
             
             // 创建共享内存管理器
             auto manager = managerMap[key] = std::make_shared<SharedMemoryManager>(key, true, length);
-            log("SharedMemoryManager created successfully.");
+            logger->debug("SharedMemoryManager created successfully.");
             
             // 获取共享内存的地址和大小
             void* addr = manager->get_address();
             size_t size = manager->get_size();
             
-            log("Shared memory created: key=%s, size=%zu, address=%p", 
+            logger->debug("Shared memory created: key=%s, size=%zu, address=%p", 
                 key.c_str(), size, addr);
             
             // 获取数据区域的地址
@@ -57,10 +59,10 @@ namespace SharedMemory {
             return buffer;
             
         } catch (const std::exception& e) {
-            log("Error: %s", e.what());
+            logger->debug("Error: %s", e.what());
             throw Napi::Error::New(env, e.what());
         } catch (...) {
-            log("Unknown error occurred");
+            logger->debug("Unknown error occurred");
             throw Napi::Error::New(env, "设置共享内存时发生未知错误");
         }
     }

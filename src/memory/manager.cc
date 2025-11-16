@@ -1,4 +1,5 @@
 #include "../memory.hh"
+#include "../logger.hh"
 #include <cmath>
 #include <cstring>
 #include <sys/stat.h>
@@ -13,7 +14,7 @@
 #endif
 
 namespace SharedMemory {
-
+    using Logger::logger;
 
     // 检测是否在Wine环境下运行
     bool is_running_under_wine() {
@@ -23,7 +24,7 @@ namespace SharedMemory {
             typedef const char* (*wine_get_version)();
             wine_get_version wine_get_version_func = (wine_get_version)GetProcAddress(hntdll, "wine_get_version");
             if (wine_get_version_func) {
-                log("Running under Wine: %s", wine_get_version_func());
+                logger->debug("Running under Wine: %s", wine_get_version_func());
                 return true;
             }
         }
@@ -50,8 +51,8 @@ namespace SharedMemory {
     {
         // 计算实际需要分配的大小（包括头部）
         size_t total_size = sizeof(SharedMemoryHeader) + size;
-        log("Size of header: %zu", sizeof(SharedMemoryHeader));
-        log("Size of header + size: %zu", total_size);
+        logger->debug("Size of header: %zu", sizeof(SharedMemoryHeader));
+        logger->debug("Size of header + size: %zu", total_size);
         
 #ifdef _WIN32
         // Windows实现
@@ -66,24 +67,24 @@ namespace SharedMemory {
         if (is_wine) {
             // Wine环境下使用/dev/shm目录
             file_path = "/dev/shm/skyline_" + key + ".dat";
-            log("Using Wine shared memory path: %s", file_path.c_str());
+            logger->debug("Using Wine shared memory path: %s", file_path.c_str());
             
             // 确保/dev/shm目录存在
             // 在Wine环境下，这个目录应该已经存在，但为了安全起见，我们检查一下
             struct stat st;
             if (stat("/dev/shm", &st) != 0) {
-                log("Warning: /dev/shm directory does not exist in Wine environment");
+                logger->debug("Warning: /dev/shm directory does not exist in Wine environment");
             }
         } else {
             // 原生Windows环境下使用用户目录
             // 获取用户目录
             char user_path[MAX_PATH];
             if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, user_path))) {
-                log("User path: %s", user_path);
+                logger->debug("User path: %s", user_path);
             } else {
                 // 如果获取用户目录失败，使用当前目录
                 GetCurrentDirectoryA(MAX_PATH, user_path);
-                log("Using current directory: %s", user_path);
+                logger->debug("Using current directory: %s", user_path);
             }
             
             // 创建文件路径
@@ -98,14 +99,14 @@ namespace SharedMemory {
         mutex_ = CreateMutexA(NULL, FALSE, mutex_name.c_str());
         if (!mutex_) {
             DWORD error = GetLastError();
-            log("Failed to create mutex, error code: %lu", error);
+            logger->debug("Failed to create mutex, error code: %lu", error);
             throw std::runtime_error("Failed to create mutex");
         }
         
         // 获取互斥锁
         if (WaitForSingleObject(mutex_, 5000) != WAIT_OBJECT_0) {
             DWORD error = GetLastError();
-            log("Failed to acquire mutex, error code: %lu", error);
+            logger->debug("Failed to acquire mutex, error code: %lu", error);
             CloseHandle(mutex_);
             mutex_ = nullptr;
             throw std::runtime_error("Failed to acquire mutex");
@@ -128,7 +129,7 @@ namespace SharedMemory {
                 
                 if (file_handle == INVALID_HANDLE_VALUE) {
                     DWORD error = GetLastError();
-                    log("Failed to create file, error code: %lu", error);
+                    logger->debug("Failed to create file, error code: %lu", error);
                     ReleaseMutex(mutex_);
                     CloseHandle(mutex_);
                     mutex_ = nullptr;
@@ -141,7 +142,7 @@ namespace SharedMemory {
                 if (!SetFilePointerEx(file_handle, file_size, NULL, FILE_BEGIN) || 
                     !SetEndOfFile(file_handle)) {
                     DWORD error = GetLastError();
-                    log("Failed to set file size, error code: %lu", error);
+                    logger->debug("Failed to set file size, error code: %lu", error);
                     CloseHandle(file_handle);
                     ReleaseMutex(mutex_);
                     CloseHandle(mutex_);
@@ -162,7 +163,7 @@ namespace SharedMemory {
                 
                 if (file_handle == INVALID_HANDLE_VALUE) {
                     DWORD error = GetLastError();
-                    log("Failed to open file, error code: %lu", error);
+                    logger->debug("Failed to open file, error code: %lu", error);
                     ReleaseMutex(mutex_);
                     CloseHandle(mutex_);
                     mutex_ = nullptr;
@@ -190,13 +191,13 @@ namespace SharedMemory {
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 header->size = size;
                 header->version = 1;
-                log("Initialized shared memory header: size=%zu, version=%d", size, header->version);
+                logger->debug("Initialized shared memory header: size=%zu, version=%d", size, header->version);
             }
             else {
                 // 读取头部信息
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 size = header->size;
-                log("Read shared memory header: size=%zu, version=%d", size, header->version);
+                logger->debug("Read shared memory header: size=%zu, version=%d", size, header->version);
                 
                 // 以头部信息为基准，重新映射
                 success = create_mapping(file_handle, size + sizeof(SharedMemoryHeader));
@@ -215,7 +216,7 @@ namespace SharedMemory {
             // 存储文件路径
             file_path_ = file_path;
             
-            log("Shared memory %s: key=%s, size=%zu, address=%p, file=%s", 
+            logger->debug("Shared memory %s: key=%s, size=%zu, address=%p, file=%s", 
                 create ? "created" : "opened", 
                 key.c_str(), 
                 size, 
@@ -258,18 +259,18 @@ namespace SharedMemory {
             mutex_ = sem_open(mutex_name.c_str(), O_CREAT, 0644, 1);
         }
         else {
-            log("Call sem_open");
+            logger->debug("Call sem_open");
             mutex_ = sem_open(mutex_name.c_str(), O_RDWR);
         }
         if (mutex_ == SEM_FAILED) {
-            log("Failed to create mutex, error: %s", strerror(errno));
+            logger->debug("Failed to create mutex, error: %s", strerror(errno));
             throw std::runtime_error("Failed to create mutex");
         }
         
         // 获取互斥锁
-        log("Call sem_wait");
+        logger->debug("Call sem_wait");
         if (sem_wait(mutex_) != 0) {
-            log("Failed to acquire mutex, error: %s", strerror(errno));
+            logger->debug("Failed to acquire mutex, error: %s", strerror(errno));
             sem_close(mutex_);
             mutex_ = nullptr;
             throw std::runtime_error("Failed to acquire mutex");
@@ -282,10 +283,10 @@ namespace SharedMemory {
             }
             
             // 创建或打开共享内存
-            log("Call shm_open");
+            logger->debug("Call shm_open");
             int fd = shm_open(shm_name.c_str(), flags, 0644);
             if (fd == -1) {
-                log("Failed to open shared memory, error: %s", strerror(errno));
+                logger->debug("Failed to open shared memory, error: %s", strerror(errno));
                 sem_post(mutex_);
                 sem_close(mutex_);
                 mutex_ = nullptr;
@@ -295,7 +296,7 @@ namespace SharedMemory {
             if (create) {
                 // 设置共享内存大小
                 if (ftruncate(fd, total_size) == -1) {
-                    log("Failed to set shared memory size, error: %s", strerror(errno));
+                    logger->debug("Failed to set shared memory size, error: %s", strerror(errno));
                     close(fd);
                     sem_post(mutex_);
                     sem_close(mutex_);
@@ -305,11 +306,11 @@ namespace SharedMemory {
             }
             else {
                 
-                log("Call mmap first.");
+                logger->debug("Call mmap first.");
                 // 映射共享内存
                 address_ = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
                 if (address_ == MAP_FAILED) {
-                    log("Failed to map shared memory, error: %s", strerror(errno));
+                    logger->debug("Failed to map shared memory, error: %s", strerror(errno));
                     sem_post(mutex_);
                     sem_close(mutex_);
                     mutex_ = nullptr;
@@ -319,20 +320,20 @@ namespace SharedMemory {
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 size = header->size;
                 size_ = size;
-                log("Read shared memory header: size=%zu, version=%d", size, header->version);
-                log("Call munmap.");
+                logger->debug("Read shared memory header: size=%zu, version=%d", size, header->version);
+                logger->debug("Call munmap.");
                 munmap(address_, total_size);
-                log("Call munmap end.");
+                logger->debug("Call munmap end.");
                 total_size = size + sizeof(SharedMemoryHeader);
             }
             
             // 映射共享内存
-            log("Call mmap second.");
+            logger->debug("Call mmap second.");
             address_ = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
             close(fd);
             
             if (address_ == MAP_FAILED) {
-                log("Failed to map shared memory, error: %s", strerror(errno));
+                logger->debug("Failed to map shared memory, error: %s", strerror(errno));
                 sem_post(mutex_);
                 sem_close(mutex_);
                 mutex_ = nullptr;
@@ -344,13 +345,13 @@ namespace SharedMemory {
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 header->size = size;
                 header->version = 1;
-                log("Initialized shared memory header: size=%zu, version=%d", size, header->version);
+                logger->debug("Initialized shared memory header: size=%zu, version=%d", size, header->version);
             }
             
             // 存储共享内存名称
             file_path_ = shm_name;
             
-            log("Shared memory %s: key=%s, size=%zu, address=%p", 
+            logger->debug("Shared memory %s: key=%s, size=%zu, address=%p", 
                 create ? "created" : "opened", 
                 key.c_str(), 
                 size, 
@@ -444,7 +445,7 @@ namespace SharedMemory {
         
         if (!file_mapping_) {
             DWORD error = GetLastError();
-            log("Failed to create file mapping, error code: %lu, size: %zu", error, mapping_size);
+            logger->debug("Failed to create file mapping, error code: %lu, size: %zu", error, mapping_size);
             return false;
         }
         
@@ -459,7 +460,7 @@ namespace SharedMemory {
         
         if (!address_) {
             DWORD error = GetLastError();
-            log("Failed to map view of file, error code: %lu, size: %zu", error, mapping_size);
+            logger->debug("Failed to map view of file, error code: %lu, size: %zu", error, mapping_size);
             CloseHandle(file_mapping_);
             file_mapping_ = nullptr;
             return false;

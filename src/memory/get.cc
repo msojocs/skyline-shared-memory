@@ -1,14 +1,13 @@
 #include "napi.h"
-#include "../memory.hh"
+#include "memory.hh"
 #include "../logger.hh"
 #include <cstring>
 #include <memory>
+#include "manager.hh"
 #include <map>
 
 namespace SharedMemory {
     using Logger::logger;
-    // 全局变量来保存共享内存资源
-    static std::map<std::string, std::shared_ptr<SharedMemoryManager>> managerMap;
     Napi::Value get_memory(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
         
@@ -27,22 +26,25 @@ namespace SharedMemory {
             logger->info("Get memory call.");
             logger->debug("Creating SharedMemoryManager...");
             
-            // 创建共享内存管理器
-            auto manager = managerMap[key] = std::make_shared<SharedMemoryManager>(key, false);
+            if (auto target = managerMap.find(key);target == managerMap.end()) {
+                managerMap[key] = std::make_shared<SharedMemoryManager>(key, false);
+            }
+            // 取共享内存管理器
+            auto manager = managerMap[key];
             logger->debug("SharedMemoryManager created successfully.");
             
             // 获取共享内存的地址和大小
             void* addr = manager->get_address();
             size_t size = manager->get_size();
             
-            logger->debug("Shared memory opened: key=%s, size=%zu, address=%p", 
-                key.c_str(), size, addr);
+            logger->debug("Shared memory opened: key={}, size={}, address={}", 
+                key, size, addr);
             
             // 读取头部信息
             SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(addr);
             size_t data_size = header->size;
             
-            logger->debug("Header information: size=%zu", data_size);
+            logger->debug("Header information: size={}", data_size);
             
             // 获取数据区域的地址
             void* data_addr = static_cast<char*>(addr) + sizeof(SharedMemoryHeader);

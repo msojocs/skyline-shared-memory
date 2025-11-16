@@ -1,8 +1,7 @@
 #pragma once
 
-#ifndef MEMORY_HH
-#define MEMORY_HH
-#include "napi.h"
+#ifndef __MANAGER_HH__
+#define __MANAGER_HH__
 #include <memory>
 #include <string>
 
@@ -18,11 +17,6 @@
 #endif
 
 namespace SharedMemory {
-    // 全局回调函数
-    extern Napi::FunctionReference console_callback;
-
-    // 清理控制台回调函数
-    void cleanup_console();
 
     // 共享内存头部结构
     struct SharedMemoryHeader {
@@ -64,41 +58,11 @@ namespace SharedMemory {
 
 #ifdef _WIN32
         HANDLE file_mapping_;       // 文件映射句柄
-        HANDLE mutex_;              // 互斥锁句柄
         
         // 创建文件映射
         bool create_mapping(HANDLE file_handle, size_t mapping_size);
 #else
-        sem_t* mutex_;              // 互斥锁
 #endif
     };
-
-    /**
-     * 设置控制台回调函数
-     * @param info 回调信息
-     * @return undefined
-     */
-    Napi::Value set_console(const Napi::CallbackInfo &info);
-
-    /**
-     * 设置共享内存 
-     * @param info 回调信息
-     * @return 共享内存的视图
-     */
-    Napi::Value set_memory(const Napi::CallbackInfo &info);
-
-    /**
-     * 获取共享内存
-     * @param info 回调信息
-     * @return 共享内存的视图
-     */
-    Napi::Value get_memory(const Napi::CallbackInfo &info);
-
-    /**
-     * 删除共享内存
-     * @param info 回调信息
-     * @return 是否成功
-     */
-    Napi::Boolean remove_memory(const Napi::CallbackInfo &info);
 }
 #endif

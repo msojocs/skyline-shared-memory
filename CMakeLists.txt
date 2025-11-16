@@ -8,7 +8,7 @@ project("module_example")
 set(VCPKG_ROOT $ENV{VCPKG_ROOT})
 message("VCPKG_ROOT: " ${VCPKG_ROOT})
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 set(CMAKE_VERBOSE_MAKEFILE ON)
@@ -93,8 +93,6 @@ set(SRC_DIR_LIST
     src/memory/get.cc
     src/memory/remove.cc
     src/memory/manager.cc
-    src/memory/console.cc
-    src/memory.hh
 )
 
 add_library(${MODULE_NAME}
@@ -103,7 +101,7 @@ add_library(${MODULE_NAME}
     ${CMAKE_JS_SRC}
     )
 
-set(IS_RUNNING_NODE false)
+set(IS_RUNNING_NODE true)
 if (WIN32)
     if(IS_RUNNING_NODE)
         message("生成 node_api.lib")

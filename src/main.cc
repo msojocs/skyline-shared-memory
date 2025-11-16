@@ -1,5 +1,5 @@
 #include <sys/types.h>
-#include "./memory.hh"
+#include "./memory/memory.hh"
 #include <napi.h>
 #include <cstdlib>
 #include "logger.hh"
@@ -11,13 +11,11 @@ Napi::Value version(const Napi::CallbackInfo &info) {
 
 // 模块卸载时的清理函数
 static void Cleanup() {
-  SharedMemory::cleanup_console();
+  
 }
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   Logger::Init();
-  exports.Set(Napi::String::New(env, "setConsole"),
-              Napi::Function::New(env, SharedMemory::set_console));
   exports.Set(Napi::String::New(env, "setMemory"),
               Napi::Function::New(env, SharedMemory::set_memory));
   exports.Set(Napi::String::New(env, "getMemory"),

@@ -2,6 +2,7 @@
 #include "./memory.hh"
 #include <napi.h>
 #include <cstdlib>
+#include "logger.hh"
 
 Napi::Value version(const Napi::CallbackInfo &info) {
   
@@ -14,6 +15,7 @@ static void Cleanup() {
 }
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  Logger::Init();
   exports.Set(Napi::String::New(env, "setConsole"),
               Napi::Function::New(env, SharedMemory::set_console));
   exports.Set(Napi::String::New(env, "setMemory"),

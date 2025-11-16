@@ -88,6 +88,7 @@ include_directories(${NODE_ADDON_API_DIR})
 set(MODULE_NAME sharedMemory)
 set(SRC_DIR_LIST
     src/main.cc
+    src/logger.cc
     src/memory/set.cc
     src/memory/get.cc
     src/memory/remove.cc

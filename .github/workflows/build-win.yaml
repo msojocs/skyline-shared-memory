@@ -45,7 +45,7 @@ jobs:
         uses: lukka/run-vcpkg@v11.5  # Option 2: specify 'latest' or 'latestrc' in the input version arguments:
       - name: Prepare
         run: |
-          pnpm install --no-frozen-lockfile
+          pnpm install --no-frozen-lockfile --ignore-scripts
           pnpm run prepare
       - uses: TheMrMilchmann/setup-msvc-dev@v3
         with:

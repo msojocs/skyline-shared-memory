@@ -4,8 +4,10 @@
 #include "manager.hh"
 
 #ifdef _WIN32
+#include <atomic>
 #include <direct.h> // 用于Windows目录创建
 #include <shlobj.h> // 用于获取用户目录
+#include <vector>
 #else
 #include <errno.h>    // 用于错误处理
 #include <sys/mman.h>
@@ -13,6 +15,67 @@
 
 namespace SharedMemory {
     using Logger::logger;
+
+#ifdef _WIN32
+    namespace {
+        std::atomic<unsigned long long> retired_file_counter{0};
+
+        bool rename_file_handle(HANDLE file_handle,
+                                const std::string &target_path) {
+            const int wide_length = MultiByteToWideChar(
+                CP_ACP, 0, target_path.c_str(), -1, NULL, 0);
+            if (wide_length <= 1) {
+                return false;
+            }
+
+            std::vector<wchar_t> wide_path(static_cast<size_t>(wide_length));
+            if (MultiByteToWideChar(
+                    CP_ACP, 0, target_path.c_str(), -1,
+                    wide_path.data(), wide_length) != wide_length) {
+                return false;
+            }
+
+            const DWORD path_bytes = static_cast<DWORD>(
+                (wide_path.size() - 1) * sizeof(wchar_t));
+            const size_t info_size = offsetof(FILE_RENAME_INFO, FileName) +
+                                     path_bytes;
+            std::vector<unsigned char> storage(info_size, 0);
+            auto *rename_info = reinterpret_cast<FILE_RENAME_INFO *>(
+                storage.data());
+            rename_info->ReplaceIfExists = FALSE;
+            rename_info->RootDirectory = NULL;
+            rename_info->FileNameLength = path_bytes;
+            std::memcpy(rename_info->FileName, wide_path.data(), path_bytes);
+            return SetFileInformationByHandle(
+                file_handle, FileRenameInfo, rename_info,
+                static_cast<DWORD>(storage.size())) != FALSE;
+        }
+
+        bool file_handles_match(HANDLE first, HANDLE second) {
+            BY_HANDLE_FILE_INFORMATION first_info{};
+            BY_HANDLE_FILE_INFORMATION second_info{};
+            return first != INVALID_HANDLE_VALUE &&
+                   second != INVALID_HANDLE_VALUE &&
+                   GetFileInformationByHandle(first, &first_info) &&
+                   GetFileInformationByHandle(second, &second_info) &&
+                   first_info.dwVolumeSerialNumber == second_info.dwVolumeSerialNumber &&
+                   first_info.nFileIndexHigh == second_info.nFileIndexHigh &&
+                   first_info.nFileIndexLow == second_info.nFileIndexLow;
+        }
+    }
+#endif
+
+    bool validate_key(const std::string& key) {
+        if (key.empty() || key.size() > 200) return false;
+        for (unsigned char ch : key) {
+            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.') {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
 
     // 检测是否在Wine环境下运行
     bool is_running_under_wine() {
@@ -43,10 +106,19 @@ namespace SharedMemory {
         : key_(key), size_(size), address_(nullptr)
 #ifdef _WIN32
         , file_mapping_(nullptr)
+        , file_handle_(INVALID_HANDLE_VALUE)
+        , remove_on_destroy_(create)
+        , remove_on_destroy_before_retire_(create)
 #else
 
 #endif
     {
+        if (!validate_key(key)) {
+            throw std::invalid_argument("invalid shared memory key");
+        }
+        if ((create && size == 0) || size > kMaxSharedMemorySize) {
+            throw std::invalid_argument("invalid shared memory size");
+        }
         // 计算实际需要分配的大小（包括头部）
         size_t total_size = sizeof(SharedMemoryHeader) + size;
         logger->debug("Size of header: {}", sizeof(SharedMemoryHeader));
@@ -91,17 +163,19 @@ namespace SharedMemory {
             create_directory(shared_memory_dir);
         }
         
+        HANDLE file_handle = INVALID_HANDLE_VALUE;
+        LARGE_INTEGER existing_size{};
+        bool created_file = false;
         try {
             // 创建或打开文件
-            HANDLE file_handle = INVALID_HANDLE_VALUE;
             if (create) {
                 // 创建新文件
                 file_handle = CreateFileA(
                     file_path.c_str(),
-                    GENERIC_READ | GENERIC_WRITE,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE,  // 允许其他进程读写
+                    GENERIC_READ | GENERIC_WRITE | DELETE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                     NULL,
-                    CREATE_ALWAYS,
+                    CREATE_NEW,
                     FILE_ATTRIBUTE_NORMAL,
                     NULL
                 );
@@ -111,6 +185,7 @@ namespace SharedMemory {
                     logger->debug("Failed to create file, error code: %lu", error);
                     throw std::runtime_error("Failed to create file");
                 }
+                created_file = true;
                 
                 // 设置文件大小
                 LARGE_INTEGER file_size;
@@ -119,7 +194,6 @@ namespace SharedMemory {
                     !SetEndOfFile(file_handle)) {
                     DWORD error = GetLastError();
                     logger->debug("Failed to set file size, error code: %lu", error);
-                    CloseHandle(file_handle);
                     throw std::runtime_error("Failed to set file size");
                 }
             } else {
@@ -127,7 +201,7 @@ namespace SharedMemory {
                 file_handle = CreateFileA(
                     file_path.c_str(),
                     GENERIC_READ | GENERIC_WRITE,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE,  // 允许其他进程读写
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                     NULL,
                     OPEN_EXISTING,
                     FILE_ATTRIBUTE_NORMAL,
@@ -139,17 +213,19 @@ namespace SharedMemory {
                     logger->debug("Failed to open file, error code: %lu", error);
                     throw std::runtime_error("Failed to open file:" + file_path);
                 }
+                if (!GetFileSizeEx(file_handle, &existing_size) ||
+                    existing_size.QuadPart < static_cast<LONGLONG>(sizeof(SharedMemoryHeader)) ||
+                    existing_size.QuadPart > static_cast<LONGLONG>(kMaxSharedMemorySize + sizeof(SharedMemoryHeader))) {
+                    throw std::runtime_error("invalid shared memory file size");
+                }
             }
             
             // 创建文件映射
-            const size_t MAX_MAPPING_SIZE = 1024 * 1024 * 1024; // 1GB per mapping
             size_t remaining_size = total_size;
-            size_t offset = 0;
             
             // 创建映射
             bool success = create_mapping(file_handle, remaining_size);
             if (!success) {
-                CloseHandle(file_handle);
                 throw std::runtime_error("Failed to create mapping");
             }
             
@@ -164,18 +240,21 @@ namespace SharedMemory {
                 // 读取头部信息
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 size = header->size;
+                if (size == 0 || size > kMaxSharedMemorySize) {
+                    throw std::runtime_error("Invalid shared memory header size");
+                }
+                if (existing_size.QuadPart < static_cast<LONGLONG>(size + sizeof(SharedMemoryHeader))) {
+                    throw std::runtime_error("shared memory header exceeds file size");
+                }
+                size_ = size;
                 logger->debug("Read shared memory header: size={}, version={}", size, header->version);
                 
                 // 以头部信息为基准，重新映射
                 success = create_mapping(file_handle, size + sizeof(SharedMemoryHeader));
                 if (!success) {
-                    CloseHandle(file_handle);
                     throw std::runtime_error("Failed to create mapping with header size");
                 }
             }
-            
-            // 关闭文件句柄，文件映射会保持文件打开
-            CloseHandle(file_handle);
             
             // 存储文件路径
             file_path_ = file_path;
@@ -186,6 +265,10 @@ namespace SharedMemory {
                 size, 
                 address_,
                 file_path_.c_str());
+
+            // Transfer ownership only after all potentially-throwing setup.
+            file_handle_ = file_handle;
+            file_handle = INVALID_HANDLE_VALUE;
                 
         } catch (...) {
             // 确保在发生异常时释放资源
@@ -197,6 +280,17 @@ namespace SharedMemory {
             if (file_mapping_) {
                 CloseHandle(file_mapping_);
                 file_mapping_ = nullptr;
+            }
+            if (file_handle != INVALID_HANDLE_VALUE) {
+                if (created_file) {
+                    FILE_DISPOSITION_INFO disposition{};
+                    disposition.DeleteFile = TRUE;
+                    SetFileInformationByHandle(
+                        file_handle, FileDispositionInfo,
+                        &disposition, sizeof(disposition));
+                }
+                CloseHandle(file_handle);
+                file_handle = INVALID_HANDLE_VALUE;
             }
             
             throw;
@@ -215,7 +309,7 @@ namespace SharedMemory {
             
             // 创建或打开共享内存
             logger->debug("Call shm_open");
-            int fd = shm_open(shm_name.c_str(), flags, 0644);
+            int fd = shm_open(shm_name.c_str(), flags, 0600);
             if (fd == -1) {
                 logger->debug("Failed to open shared memory, error: %s", strerror(errno));
 
@@ -232,18 +326,32 @@ namespace SharedMemory {
                 }
             }
             else {
+                struct stat file_stat{};
+                if (fstat(fd, &file_stat) != 0 ||
+                    file_stat.st_size < static_cast<off_t>(sizeof(SharedMemoryHeader)) ||
+                    file_stat.st_size > static_cast<off_t>(kMaxSharedMemorySize + sizeof(SharedMemoryHeader))) {
+                    close(fd);
+                    throw std::runtime_error("invalid shared memory file size");
+                }
                 
                 logger->debug("Call mmap first.");
                 // 映射共享内存
                 address_ = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
                 if (address_ == MAP_FAILED) {
                     logger->debug("Failed to map shared memory, error: %s", strerror(errno));
-
+                    close(fd);
                     throw std::runtime_error("Failed to map shared memory");
                 }
                 // 读取头部信息
                 SharedMemoryHeader* header = static_cast<SharedMemoryHeader*>(address_);
                 size = header->size;
+                if (size == 0 || size > kMaxSharedMemorySize ||
+                    size + sizeof(SharedMemoryHeader) > static_cast<size_t>(file_stat.st_size)) {
+                    munmap(address_, total_size);
+                    address_ = nullptr;
+                    close(fd);
+                    throw std::runtime_error("Invalid shared memory header size");
+                }
                 size_ = size;
                 logger->debug("Read shared memory header: size=%zu, version=%d", size, header->version);
                 logger->debug("Call munmap.");
@@ -310,7 +418,21 @@ namespace SharedMemory {
             file_mapping_ = nullptr;
         }
         
-        DeleteFileA(file_path_.c_str());
+        if (file_handle_ != INVALID_HANDLE_VALUE) {
+            if (remove_on_destroy_) {
+                FILE_DISPOSITION_INFO disposition{};
+                disposition.DeleteFile = TRUE;
+                if (!SetFileInformationByHandle(
+                        file_handle_, FileDispositionInfo,
+                        &disposition, sizeof(disposition))) {
+                    logger->debug(
+                        "Failed to delete shared memory file by handle, error code: %lu",
+                        GetLastError());
+                }
+            }
+            CloseHandle(file_handle_);
+            file_handle_ = INVALID_HANDLE_VALUE;
+        }
 #else
         // Linux实现
         // 释放资源
@@ -328,6 +450,72 @@ namespace SharedMemory {
     }
 
     #ifdef _WIN32
+    bool SharedMemoryManager::retire_backing_file() {
+        if (file_path_.empty() || !canonical_file_path_.empty()) {
+            return false;
+        }
+
+        const size_t separator = file_path_.find_last_of("\\/");
+        const std::string directory = separator == std::string::npos
+            ? std::string()
+            : file_path_.substr(0, separator + 1);
+        for (size_t attempt = 0; attempt < 32; ++attempt) {
+            const auto counter = retired_file_counter.fetch_add(1);
+            const std::string retired_path = directory +
+                ".skyline-retired-" + std::to_string(GetCurrentProcessId()) +
+                "-" + std::to_string(reinterpret_cast<uintptr_t>(this)) +
+                "-" + std::to_string(counter) + ".dat";
+            std::string canonical_path = file_path_;
+            std::string owned_retired_path = retired_path;
+            HANDLE rename_handle = CreateFileA(
+                file_path_.c_str(), DELETE | FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (rename_handle == INVALID_HANDLE_VALUE) {
+                logger->debug(
+                    "Failed to open shared memory file for retirement, error code: %lu",
+                    GetLastError());
+                return false;
+            }
+            if (!file_handles_match(file_handle_, rename_handle)) {
+                CloseHandle(rename_handle);
+                logger->debug("Canonical shared memory path changed before retirement");
+                return false;
+            }
+            if (rename_file_handle(rename_handle, retired_path)) {
+                canonical_file_path_.swap(canonical_path);
+                file_path_.swap(owned_retired_path);
+                remove_on_destroy_before_retire_ = remove_on_destroy_;
+                remove_on_destroy_ = true;
+                CloseHandle(file_handle_);
+                file_handle_ = rename_handle;
+                return true;
+            }
+
+            const DWORD error = GetLastError();
+            CloseHandle(rename_handle);
+            if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS) {
+                logger->debug("Failed to retire shared memory file, error code: %lu", error);
+                return false;
+            }
+        }
+        return false;
+    }
+
+    bool SharedMemoryManager::restore_backing_file_if_missing() {
+        if (canonical_file_path_.empty()) {
+            return false;
+        }
+        if (!rename_file_handle(file_handle_, canonical_file_path_)) {
+            logger->debug("Failed to restore shared memory file, error code: %lu", GetLastError());
+            return false;
+        }
+        file_path_.swap(canonical_file_path_);
+        canonical_file_path_.clear();
+        remove_on_destroy_ = remove_on_destroy_before_retire_;
+        return true;
+    }
+
     bool SharedMemoryManager::create_mapping(HANDLE file_handle, size_t mapping_size) {
         // 如果已存在映射，先清理
         if (file_mapping_) {
@@ -376,4 +564,4 @@ namespace SharedMemory {
     }
     #endif
 
-} 
+}

@@ -51,7 +51,7 @@ jobs:
           cmake-version: '3.16.x'
       - name: Prepare
         run: |
-          pnpm install --no-frozen-lockfile
+          pnpm install --no-frozen-lockfile --ignore-scripts
           pnpm run prepare
       - name: Build
         run: |

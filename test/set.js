@@ -18,7 +18,18 @@ process.on('uncaughtException', (err) => {
         if (!result || !result.byteLength) {
             throw new Error('共享内存创建失败');
         }
-        let sharedBufferView = new Uint8Array(result)
+        // Electron's Windows ABI returns a 16-byte pointer/size handle;
+        // populate that mapping through the explicit address API. Linux keeps
+        // the historical ArrayBuffer return value.
+        const handle = process.platform === 'win32' ? result : undefined;
+        let sharedBufferView;
+        if (process.platform === 'win32') {
+            const initial = Buffer.alloc(length);
+            sharedMemory.setMemoryByAddress(result, initial);
+            sharedBufferView = new Uint8Array(sharedMemory.getMemory(key));
+        } else {
+            sharedBufferView = new Uint8Array(result);
+        }
         
         console.info('------print initial state---------')
         console.log('Buffer length:', sharedBufferView.length, result.byteLength);
@@ -37,6 +48,9 @@ process.on('uncaughtException', (err) => {
             console.error('写入数据失败:', writeError);
             console.error('错误堆栈:', writeError.stack);
             throw writeError;
+        }
+        if (handle) {
+            sharedMemory.setMemoryByAddress(handle, sharedBufferView);
         }
         
         console.info('------print after write---------')

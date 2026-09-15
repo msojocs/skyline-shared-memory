@@ -4,6 +4,7 @@
 #define __MANAGER_HH__
 #include <memory>
 #include <string>
+#include <cstddef>
 
 // 平台特定的头文件
 #ifdef _WIN32
@@ -17,6 +18,13 @@
 #endif
 
 namespace SharedMemory {
+
+    constexpr size_t kMaxSharedMemorySize = static_cast<size_t>(1024) * 1024 * 1024;
+
+    // Keys become POSIX shared-memory names or filesystem paths.  Keep the
+    // accepted alphabet deliberately narrow so an API caller cannot escape
+    // the shared-memory directory or create ambiguous names.
+    bool validate_key(const std::string& key);
 
     // 共享内存头部结构
     struct SharedMemoryHeader {
@@ -41,6 +49,10 @@ namespace SharedMemory {
         
         // 获取文件路径
         const std::string& get_file_path() const { return file_path_; }
+
+#ifdef _WIN32
+        bool owns_backing_file() const { return remove_on_destroy_; }
+#endif
         
         // 获取版本号
         int get_version() const { 
@@ -49,6 +61,13 @@ namespace SharedMemory {
             }
             return 0;
         }
+
+#ifdef _WIN32
+        // Move the current generation aside while keeping its mapped view
+        // alive, so a new generation can reuse the canonical key path.
+        bool retire_backing_file();
+        bool restore_backing_file_if_missing();
+#endif
         
     private:
         std::string key_;           // 共享内存键名
@@ -58,6 +77,10 @@ namespace SharedMemory {
 
 #ifdef _WIN32
         HANDLE file_mapping_;       // 文件映射句柄
+        HANDLE file_handle_;        // 标识实际映射的文件对象
+        bool remove_on_destroy_;    // 仅创建者负责删除 backing
+        bool remove_on_destroy_before_retire_;
+        std::string canonical_file_path_;
         
         // 创建文件映射
         bool create_mapping(HANDLE file_handle, size_t mapping_size);

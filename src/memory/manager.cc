@@ -37,15 +37,22 @@ namespace SharedMemory {
 
             const DWORD path_bytes = static_cast<DWORD>(
                 (wide_path.size() - 1) * sizeof(wchar_t));
+            // FileNameLength excludes the terminator, but the kernel still
+            // reads it.  Sizing the buffer to end exactly at the last
+            // character let that read land on adjacent heap bytes, so the
+            // rename failed intermittently with ERROR_INVALID_NAME or
+            // ERROR_PATH_NOT_FOUND depending on what happened to be there.
+            // Keep a terminator inside the buffer and copy it explicitly.
+            const size_t name_bytes = wide_path.size() * sizeof(wchar_t);
             const size_t info_size = offsetof(FILE_RENAME_INFO, FileName) +
-                                     path_bytes;
+                                     name_bytes;
             std::vector<unsigned char> storage(info_size, 0);
             auto *rename_info = reinterpret_cast<FILE_RENAME_INFO *>(
                 storage.data());
             rename_info->ReplaceIfExists = FALSE;
             rename_info->RootDirectory = NULL;
             rename_info->FileNameLength = path_bytes;
-            std::memcpy(rename_info->FileName, wide_path.data(), path_bytes);
+            std::memcpy(rename_info->FileName, wide_path.data(), name_bytes);
             return SetFileInformationByHandle(
                 file_handle, FileRenameInfo, rename_info,
                 static_cast<DWORD>(storage.size())) != FALSE;

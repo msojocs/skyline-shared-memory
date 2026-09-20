@@ -10,6 +10,14 @@ project("module_example")
 # makes the direct-CMake and MinGW paths deterministic.
 add_compile_definitions(BUILDING_NODE_EXTENSION)
 
+# <windows.h> declares min/max as macros unless NOMINMAX is set, which turns
+# std::numeric_limits<T>::max() (src/memory/memory.hh, set.cc) and std::min
+# (src/memory/get.cc) into syntax errors.  Two headers pull in windows.h, so
+# define it for the whole target rather than at each include site.
+if(WIN32)
+    add_compile_definitions(NOMINMAX)
+endif()
+
 set(VCPKG_ROOT $ENV{VCPKG_ROOT})
 message("VCPKG_ROOT: " ${VCPKG_ROOT})
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -85,10 +93,37 @@ execute_process(COMMAND
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 message("CMAKE_JS_INC:" ${CMAKE_JS_INC})
+
+# cmake-js resolves this list via the Visual Studio finder it vendors from
+# node-gyp, which only knows VS 2017/2019/2022.  On a toolchain it cannot
+# identify (e.g. VS 2026, major version 18) the sub-command aborts and the
+# list comes back empty, so node-addon-api's <node_api.h> is never found even
+# though naming a generator got the build itself past that same detection.
+# Fall back to the ABI-stable Node-API headers, which are already a dependency
+# for the import library below.
+message("获取 node-api-headers 配置")
+execute_process(COMMAND
+    node -p "require('node-api-headers').include_dir"
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    OUTPUT_VARIABLE NODE_API_HEADERS_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+get_filename_component(NODE_API_HEADERS_DIR "${NODE_API_HEADERS_DIR}"
+    ABSOLUTE BASE_DIR "${PROJECT_SOURCE_DIR}")
+message("node-api-headers 路径:${NODE_API_HEADERS_DIR}")
+
 foreach(item IN LISTS CMAKE_JS_INC)
     message("include: ${item}")
     include_directories(${item})
 endforeach()
+
+if(NOT CMAKE_JS_INC)
+    if(NOT EXISTS "${NODE_API_HEADERS_DIR}/node_api.h")
+        message(FATAL_ERROR "cmake-js supplied no include directory and node-api-headers/node_api.h was not found")
+    endif()
+    message("cmake-js 未提供 include 目录，回退到 node-api-headers")
+    include_directories(${NODE_API_HEADERS_DIR})
+endif()
 
 message("获取 node-addon-api 配置")
 execute_process(COMMAND
